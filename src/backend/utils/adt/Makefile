@@ -80,6 +80,7 @@ OBJS = \
 	rangetypes.o \
 	rangetypes_gist.o \
 	rangetypes_selfuncs.o \
+	rangetypes_helfuncs.o \
 	rangetypes_spgist.o \
 	rangetypes_typanalyze.o \
 	regexp.o \

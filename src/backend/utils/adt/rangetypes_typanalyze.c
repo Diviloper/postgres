@@ -31,10 +31,10 @@
 #include "utils/lsyscache.h"
 #include "utils/rangetypes.h"
 
-static int	float8_qsort_cmp(const void *a1, const void *a2);
-static int	range_bound_qsort_cmp(const void *a1, const void *a2, void *arg);
-static void compute_range_stats(VacAttrStats *stats,
-								AnalyzeAttrFetchFunc fetchfunc, int samplerows, double totalrows);
+static int	float8_qsort_cmp(const void* a1, const void* a2);
+static int	range_bound_qsort_cmp(const void* a1, const void* a2, void* arg);
+static void compute_range_stats(VacAttrStats* stats,
+	AnalyzeAttrFetchFunc fetchfunc, int samplerows, double totalrows);
 
 /*
  * range_typanalyze -- typanalyze function for range columns
@@ -42,8 +42,8 @@ static void compute_range_stats(VacAttrStats *stats,
 Datum
 range_typanalyze(PG_FUNCTION_ARGS)
 {
-	VacAttrStats *stats = (VacAttrStats *) PG_GETARG_POINTER(0);
-	TypeCacheEntry *typcache;
+	VacAttrStats* stats = (VacAttrStats*)PG_GETARG_POINTER(0);
+	TypeCacheEntry* typcache;
 	Form_pg_attribute attr = stats->attr;
 
 	/* Get information about range type; note column might be a domain */
@@ -56,7 +56,9 @@ range_typanalyze(PG_FUNCTION_ARGS)
 	stats->extra_data = typcache;
 	/* same as in std_typanalyze */
 	stats->minrows = 300 * attr->attstattarget;
-
+	// DBSA Exercise 8x01
+	fprintf(stderr, "Look at those stats!!\n");
+	fprintf(stderr, "Minimum number of rows: %i rows\n", stats->minrows);
 	PG_RETURN_BOOL(true);
 }
 
@@ -64,10 +66,10 @@ range_typanalyze(PG_FUNCTION_ARGS)
  * Comparison function for sorting float8s, used for range lengths.
  */
 static int
-float8_qsort_cmp(const void *a1, const void *a2)
+float8_qsort_cmp(const void* a1, const void* a2)
 {
-	const float8 *f1 = (const float8 *) a1;
-	const float8 *f2 = (const float8 *) a2;
+	const float8* f1 = (const float8*)a1;
+	const float8* f2 = (const float8*)a2;
 
 	if (*f1 < *f2)
 		return -1;
@@ -81,23 +83,24 @@ float8_qsort_cmp(const void *a1, const void *a2)
  * Comparison function for sorting RangeBounds.
  */
 static int
-range_bound_qsort_cmp(const void *a1, const void *a2, void *arg)
+range_bound_qsort_cmp(const void* a1, const void* a2, void* arg)
 {
-	RangeBound *b1 = (RangeBound *) a1;
-	RangeBound *b2 = (RangeBound *) a2;
-	TypeCacheEntry *typcache = (TypeCacheEntry *) arg;
+	RangeBound* b1 = (RangeBound*)a1;
+	RangeBound* b2 = (RangeBound*)a2;
+	TypeCacheEntry* typcache = (TypeCacheEntry*)arg;
 
 	return range_cmp_bounds(typcache, b1, b2);
 }
 
 /*
  * compute_range_stats() -- compute statistics for a range column
+ * DBSA PROJECT range_typeanalyze
  */
 static void
-compute_range_stats(VacAttrStats *stats, AnalyzeAttrFetchFunc fetchfunc,
-					int samplerows, double totalrows)
+compute_range_stats(VacAttrStats* stats, AnalyzeAttrFetchFunc fetchfunc,
+	int samplerows, double totalrows)
 {
-	TypeCacheEntry *typcache = (TypeCacheEntry *) stats->extra_data;
+	TypeCacheEntry* typcache = (TypeCacheEntry*)stats->extra_data;
 	bool		has_subdiff = OidIsValid(typcache->rng_subdiff_finfo.fn_oid);
 	int			null_cnt = 0;
 	int			non_null_cnt = 0;
@@ -107,25 +110,24 @@ compute_range_stats(VacAttrStats *stats, AnalyzeAttrFetchFunc fetchfunc,
 	int			slot_idx;
 	int			num_bins = stats->attr->attstattarget;
 	int			num_hist;
-	float8	   *lengths;
-	RangeBound *lowers,
-			   *uppers;
+	float8* lengths;
+	RangeBound* lowers, * uppers;
 	double		total_width = 0;
 
 	/* Allocate memory to hold range bounds and lengths of the sample ranges. */
-	lowers = (RangeBound *) palloc(sizeof(RangeBound) * samplerows);
-	uppers = (RangeBound *) palloc(sizeof(RangeBound) * samplerows);
-	lengths = (float8 *) palloc(sizeof(float8) * samplerows);
+	lowers = (RangeBound*)palloc(sizeof(RangeBound) * samplerows);
+	uppers = (RangeBound*)palloc(sizeof(RangeBound) * samplerows);
+	lengths = (float8*)palloc(sizeof(float8) * samplerows);
 
 	/* Loop over the sample ranges. */
 	for (range_no = 0; range_no < samplerows; range_no++)
 	{
 		Datum		value;
 		bool		isnull,
-					empty;
-		RangeType  *range;
+			empty;
+		RangeType* range;
 		RangeBound	lower,
-					upper;
+			upper;
 		float8		length;
 
 		vacuum_delay_point();
@@ -153,7 +155,6 @@ compute_range_stats(VacAttrStats *stats, AnalyzeAttrFetchFunc fetchfunc,
 			/* Remember bounds and length for further usage in histograms */
 			lowers[non_empty_cnt] = lower;
 			uppers[non_empty_cnt] = upper;
-
 			if (lower.infinite || upper.infinite)
 			{
 				/* Length of any kind of an infinite range is infinite */
@@ -166,8 +167,8 @@ compute_range_stats(VacAttrStats *stats, AnalyzeAttrFetchFunc fetchfunc,
 				 * and lower bound values.
 				 */
 				length = DatumGetFloat8(FunctionCall2Coll(&typcache->rng_subdiff_finfo,
-														  typcache->rng_collation,
-														  upper.val, lower.val));
+					typcache->rng_collation,
+					upper.val, lower.val));
 			}
 			else
 			{
@@ -189,20 +190,20 @@ compute_range_stats(VacAttrStats *stats, AnalyzeAttrFetchFunc fetchfunc,
 	/* We can only compute real stats if we found some non-null values. */
 	if (non_null_cnt > 0)
 	{
-		Datum	   *bound_hist_values;
-		Datum	   *length_hist_values;
+		Datum* bound_hist_values;
+		Datum* length_hist_values;
 		int			pos,
-					posfrac,
-					delta,
-					deltafrac,
-					i;
+			posfrac,
+			delta,
+			deltafrac,
+			i;
 		MemoryContext old_cxt;
-		float4	   *emptyfrac;
+		float4* emptyfrac;
 
 		stats->stats_valid = true;
 		/* Do the simple null-frac and width stats */
-		stats->stanullfrac = (double) null_cnt / (double) samplerows;
-		stats->stawidth = total_width / (double) non_null_cnt;
+		stats->stanullfrac = (double)null_cnt / (double)samplerows;
+		stats->stawidth = total_width / (double)non_null_cnt;
 
 		/* Estimate that non-null values are unique */
 		stats->stadistinct = -1.0 * (1.0 - stats->stanullfrac);
@@ -216,24 +217,156 @@ compute_range_stats(VacAttrStats *stats, AnalyzeAttrFetchFunc fetchfunc,
 		 */
 		if (non_empty_cnt >= 2)
 		{
+
+			// DBSAP ALL NEW CODE IS IN THIS IF
+			// Calculat equi-width histogram 
+			// (we can only calculate it if we can calculate the difference between the bounds)
+			if (has_subdiff) {
+
+				int64* equiWidthHistogram;
+
+				// Get histogram absolute min and max values (edges of histogram)
+				RangeBound minLower = lowers[0];
+				RangeBound maxUpper = uppers[0];
+				// Initialize bounds to first non-infinite bound
+				for (int i = 0; i < non_empty_cnt && minLower.infinite; ++i) minLower = lowers[i];
+				for (int i = 0; i < non_empty_cnt && maxUpper.infinite; ++i) maxUpper = uppers[i];
+
+
+				// Find min lower and max upper bounds (ignoring infinite bounds)
+				for (int i = 0; i < non_empty_cnt; ++i) {
+					if (!lowers[i].infinite && range_cmp_bounds(typcache, &lowers[i], &minLower) < 0) {
+						minLower = lowers[i];
+					}
+					if (!uppers[i].infinite && range_cmp_bounds(typcache, &uppers[i], &maxUpper) > 0) {
+						maxUpper = uppers[i];
+					}
+				}
+				// Save bounds of histogram
+				Datum* histogramBounds = (Datum*)palloc(sizeof(Datum));
+				histogramBounds[0] = PointerGetDatum(range_serialize(typcache,
+					&minLower,
+					&maxUpper,
+					false));
+
+				// Get actual min and max values
+				Datum minValue = minLower.val;
+				Datum maxValue = maxUpper.val;
+				fprintf(stderr, "DBSAP -> EquiWidth Histogram Min: %i\n", minValue);
+				fprintf(stderr, "DBSAP -> EquiWidth Histogram Max: %i\n", maxValue);
+
+				// Get width of whole histogram
+				float8 histogramWidth = DatumGetFloat8(FunctionCall2Coll(&typcache->rng_subdiff_finfo,
+					typcache->rng_collation,
+					maxValue, minValue));
+				fprintf(stderr, "DBSAP -> EquiWidth Histogram Width: %f\n", histogramWidth);
+
+				// Get number of bins. Since equiwidth histograms don't have the same restriction in the
+				//  number of bins as the equi-depth histograms (num_bins <= num_samples), we can use the
+				//  same number of bins all the time.
+				// In this case, we use num_bins (stats->attr->attstattarget)
+				int equiWidthBins = num_bins;
+				fprintf(stderr, "DBSAP -> EquiWidth Histogram Number of Bins: %i\n", equiWidthBins);
+				// Get the width of the bins
+				float8 binWidth = histogramWidth / equiWidthBins;
+				fprintf(stderr, "DBSAP -> EquiWidth Histogram Bin Width: %f\n", binWidth);
+
+				// Initialize histogram
+				equiWidthHistogram = (int64*)palloc(equiWidthBins * sizeof(int64));
+				memset(equiWidthHistogram, 0, equiWidthBins * sizeof(int64));
+				fprintf(stderr, "DBSAP -> EquiWidth Histogram Initialization\n");
+
+				//Fill histogram
+				int sumBinsPerRange = 0;
+				fprintf(stderr, "DBSAP -> EquiWidth Histogram Filling Start\n");
+				for (int i = 0; i < non_empty_cnt; ++i) {
+					RangeBound	lower = lowers[i], upper = uppers[i];
+					fprintf(stderr, "       · Range %i: [%i, %i]", i, lower.val, upper.val);
+					int startBin;
+					if (lower.infinite) startBin = 0; // First bin if lower is -infinite
+					else {
+						float8 lowerDiff = DatumGetFloat8(FunctionCall2Coll(&typcache->rng_subdiff_finfo,
+							typcache->rng_collation,
+							lower.val, minValue));
+						startBin = (int)lowerDiff / binWidth;
+					}
+					int endBin;
+					if (upper.infinite) endBin = equiWidthBins - 1; // Last bin if upper is infinite
+					else {
+						float8 upperDiff = DatumGetFloat8(FunctionCall2Coll(&typcache->rng_subdiff_finfo,
+							typcache->rng_collation,
+							upper.val, minValue));
+						endBin = (int)upperDiff / binWidth;
+						if (endBin >= equiWidthBins) endBin = equiWidthBins - 1; // Edge case when upper == maxUpper
+					}
+					// Get the number of bins that this range is in (to calculate the average afterwards)
+					int numBins = endBin - startBin + 1;
+					sumBinsPerRange += numBins;
+					fprintf(stderr, " => Bins: %i - %i", startBin, endBin);
+					// Increase the bins this range is in
+					for (int bin = startBin; bin <= endBin; ++bin) equiWidthHistogram[bin]++;
+					fprintf(stderr, "\n");
+				}
+				// Calculate the average number of bins each range is in
+				float4 avgBinsPerRange = (float4)sumBinsPerRange / (float4)non_empty_cnt;
+
+				fprintf(stderr, "DBSAP -> EquiWidth Histogram: ");
+				for (int bin = 0; bin < equiWidthBins; ++bin) {
+					fprintf(stderr, "%i | ", equiWidthHistogram[bin]);
+				}
+				fprintf(stderr, "\n");
+
+				// Save histogram datatype metadata
+				stats->stakind[slot_idx] = STATISTIC_KIND_EQUIWIDTH_RANGE_HISTOGRAM;
+				stats->staop[slot_idx] = Int8LessOperator;
+				stats->stacoll[slot_idx] = InvalidOid;
+				stats->statypid[slot_idx] = INT8OID;
+				stats->statyplen[slot_idx] = sizeof(int64);
+				stats->statypbyval[slot_idx] = USE_FLOAT8_BYVAL;
+				stats->statypalign[slot_idx] = TYPALIGN_DOUBLE;
+
+				// Save histogram data
+				stats->stavalues[slot_idx] = equiWidthHistogram;
+				stats->numvalues[slot_idx] = equiWidthBins;
+
+				// Save histogram metadata
+				stats->numnumbers[slot_idx] = 4;
+				float4* binInfo = (float4*)palloc(sizeof(float4) * 4);
+				binInfo[0] = (float4)binWidth;
+				binInfo[1] = avgBinsPerRange;
+				binInfo[2] = (float4)histogramWidth;
+				binInfo[3] = (float4)sumBinsPerRange;
+				stats->stanumbers[slot_idx] = binInfo;
+
+				slot_idx++;
+
+				// To save the histogram bounds we need to use another statistic slot
+				// because the bounds are of unknown type and need to be saved as Datum
+				stats->stakind[slot_idx] = STATISTIC_KIND_EQUIWIDTH_RANGE_HISTOGRAM_BOUNDS;
+				stats->stavalues[slot_idx] = histogramBounds;
+				stats->numvalues[slot_idx] = 1;
+
+				slot_idx++;
+			}
+
 			/* Sort bound values */
 			qsort_arg(lowers, non_empty_cnt, sizeof(RangeBound),
-					  range_bound_qsort_cmp, typcache);
+				range_bound_qsort_cmp, typcache);
 			qsort_arg(uppers, non_empty_cnt, sizeof(RangeBound),
-					  range_bound_qsort_cmp, typcache);
+				range_bound_qsort_cmp, typcache);
 
 			num_hist = non_empty_cnt;
 			if (num_hist > num_bins)
 				num_hist = num_bins + 1;
 
-			bound_hist_values = (Datum *) palloc(num_hist * sizeof(Datum));
+			bound_hist_values = (Datum*)palloc(num_hist * sizeof(Datum));
 
 			/*
 			 * The object of this loop is to construct ranges from first and
 			 * last entries in lowers[] and uppers[] along with evenly-spaced
-			 * values in between. So the i'th value is a range of lowers[(i *
-			 * (nvals - 1)) / (num_hist - 1)] and uppers[(i * (nvals - 1)) /
-			 * (num_hist - 1)]. But computing that subscript directly risks
+			 * values in between. So the i'th value is a range of
+			 * lowers[(i * (nvals - 1)) / (num_hist - 1)] and
+			 * uppers[(i * (nvals - 1)) / (num_hist - 1)]. But computing that subscript directly risks
 			 * integer overflow when the stats target is more than a couple
 			 * thousand.  Instead we add (nvals - 1) / (num_hist - 1) to pos
 			 * at each step, tracking the integral and fractional parts of the
@@ -246,9 +379,9 @@ compute_range_stats(VacAttrStats *stats, AnalyzeAttrFetchFunc fetchfunc,
 			for (i = 0; i < num_hist; i++)
 			{
 				bound_hist_values[i] = PointerGetDatum(range_serialize(typcache,
-																	   &lowers[pos],
-																	   &uppers[pos],
-																	   false));
+					&lowers[pos],
+					&uppers[pos],
+					false));
 				pos += delta;
 				posfrac += deltafrac;
 				if (posfrac >= (num_hist - 1))
@@ -281,7 +414,7 @@ compute_range_stats(VacAttrStats *stats, AnalyzeAttrFetchFunc fetchfunc,
 			if (num_hist > num_bins)
 				num_hist = num_bins + 1;
 
-			length_hist_values = (Datum *) palloc(num_hist * sizeof(Datum));
+			length_hist_values = (Datum*)palloc(num_hist * sizeof(Datum));
 
 			/*
 			 * The object of this loop is to copy the first and last lengths[]
@@ -330,8 +463,8 @@ compute_range_stats(VacAttrStats *stats, AnalyzeAttrFetchFunc fetchfunc,
 		stats->statypalign[slot_idx] = 'd';
 
 		/* Store the fraction of empty ranges */
-		emptyfrac = (float4 *) palloc(sizeof(float4));
-		*emptyfrac = ((double) empty_cnt) / ((double) non_null_cnt);
+		emptyfrac = (float4*)palloc(sizeof(float4));
+		*emptyfrac = ((double)empty_cnt) / ((double)non_null_cnt);
 		stats->stanumbers[slot_idx] = emptyfrac;
 		stats->numnumbers[slot_idx] = 1;
 
@@ -353,4 +486,5 @@ compute_range_stats(VacAttrStats *stats, AnalyzeAttrFetchFunc fetchfunc,
 	 * We don't need to bother cleaning up any of our temporary palloc's. The
 	 * hashtable should also go away, as it used a child memory context.
 	 */
+	fprintf(stderr, "End of function\n");
 }

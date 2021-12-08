@@ -59,7 +59,33 @@ static double calc_hist_selectivity_contains(TypeCacheEntry *typcache,
 											 const RangeBound *lower, const RangeBound *upper,
 											 const RangeBound *hist_lower, int hist_nvalues,
 											 Datum *length_hist_values, int length_hist_nvalues);
+static double
+calc_equi_hist_selectivity_left(TypeCacheEntry *typcache, const float lowerDistance,
+								const int64 *hist, const int num_bins, const float totalBinSum, const float binWidth);
 
+static double
+calc_equi_hist_selectivity_overlap(TypeCacheEntry *typcache, const float lowerDistance, const float upperDistance,
+								const int64 *hist, const int num_bins, const float totalBinSum, const float binWidth);
+
+								
+double calculate_range_left_of_fraction(
+	double* xa,
+	double* ya,
+	double min_a,
+	double max_a,
+	unsigned int countOfElements,
+	double const_lower
+);
+								
+double calculate_range_overlap_fraction(
+	double* xa,
+	double* ya,
+	double min_a,
+	double max_a,
+	unsigned int countOfElements,
+	double const_lower,
+	double const_upper
+);
 /*
  * Returns a default selectivity estimate for given operator, when we don't
  * have statistics or cannot use them for some reason.
@@ -375,6 +401,10 @@ calc_hist_selectivity(TypeCacheEntry *typcache, VariableStatData *vardata,
 {
 	AttStatsSlot hslot;
 	AttStatsSlot lslot;
+	//DBSAP -> Add three new slots for HistogramValues (hv), HistogramNumbers (hn) and HistogramBounds (hb)
+	AttStatsSlot hvslot;
+	AttStatsSlot hnslot;
+	AttStatsSlot hbslot;
 	int			nhist;
 	RangeBound *hist_lower;
 	RangeBound *hist_upper;
@@ -383,6 +413,12 @@ calc_hist_selectivity(TypeCacheEntry *typcache, VariableStatData *vardata,
 	RangeBound	const_upper;
 	bool		empty;
 	double		hist_selec;
+	//DBSAP -> Add new histogram variables
+	RangeBound *hist_min, *hist_max;
+	int64* hist_vals, num_bins;
+	bool 		hist_empty;
+	float lowerDistance, upperDistance, binWidth, totalBinSum;
+
 
 	/* Can't use the histogram with insecure range support functions */
 	if (!statistic_proc_security_check(vardata,
@@ -448,9 +484,79 @@ calc_hist_selectivity(TypeCacheEntry *typcache, VariableStatData *vardata,
 	else
 		memset(&lslot, 0, sizeof(lslot));
 
+	
+
 	/* Extract the bounds of the constant value. */
 	range_deserialize(typcache, constval, &const_lower, &const_upper, &empty);
 	Assert(!empty);
+	
+	//DBSAP -> Get equiwidth histogram for << and &&
+	if (operator == OID_RANGE_LEFT_OP ||
+		operator == OID_RANGE_OVERLAP_OP) 
+	{
+		//DBSAP -> Try to get all the histogram info
+		if (!(HeapTupleIsValid(vardata->statsTuple) &&
+			get_attstatsslot(&hvslot, vardata->statsTuple,
+							STATISTIC_KIND_EQUIWIDTH_RANGE_HISTOGRAM,
+							InvalidOid,
+							ATTSTATSSLOT_VALUES)))
+		{
+			free_attstatsslot(&hslot);
+			free_attstatsslot(&lslot);
+			return -1.0;
+		}
+		if (!(HeapTupleIsValid(vardata->statsTuple) &&
+			get_attstatsslot(&hnslot, vardata->statsTuple,
+							STATISTIC_KIND_EQUIWIDTH_RANGE_HISTOGRAM,
+							InvalidOid,
+							ATTSTATSSLOT_NUMBERS)))
+		{
+			free_attstatsslot(&hslot);
+			free_attstatsslot(&lslot);
+			free_attstatsslot(&hvslot);
+			return -1.0;
+		}
+		if (!(HeapTupleIsValid(vardata->statsTuple) &&
+			get_attstatsslot(&hbslot, vardata->statsTuple,
+							STATISTIC_KIND_EQUIWIDTH_RANGE_HISTOGRAM_BOUNDS,
+							InvalidOid,
+							ATTSTATSSLOT_VALUES)))
+		{
+			free_attstatsslot(&hslot);
+			free_attstatsslot(&lslot);
+			free_attstatsslot(&hvslot);
+			free_attstatsslot(&hnslot);
+			return -1.0;
+		}
+		hist_min = (RangeBound*)palloc(sizeof(RangeBound));
+		hist_max = (RangeBound*)palloc(sizeof(RangeBound));
+		hist_vals = (int64*)hvslot.values;
+		num_bins = hvslot.nvalues;
+		// fprintf(stderr, "Histogram = [");
+		// for (i = 0; i < hvslot.nvalues; i++) {
+		// 	fprintf(stderr, "%i", hist_vals[i]);
+		// 	if (i < hvslot.nvalues - 1) fprintf(stderr, ", ");
+		// }
+		// fprintf(stderr, "]\n");
+
+		range_deserialize(typcache, DatumGetRangeTypeP(hbslot.values[0]),
+						  hist_min, hist_max, &hist_empty);
+		fprintf(stderr, "Const bounds: [%i, %i]\n", const_lower.val, const_upper.val);
+		fprintf(stderr, "Hist bounds : [%i, %i]\n", hist_min->val, hist_max->val);
+		
+		lowerDistance = DatumGetFloat8(FunctionCall2Coll(&typcache->rng_subdiff_finfo,
+							typcache->rng_collation,
+							const_lower.val, hist_min->val));
+		upperDistance = DatumGetFloat8(FunctionCall2Coll(&typcache->rng_subdiff_finfo,
+							typcache->rng_collation,
+							const_upper.val, hist_min->val));
+		binWidth = hnslot.numbers[0];
+		totalBinSum = hnslot.numbers[3];
+	} else {
+		memset(&hvslot, 0, sizeof(hvslot));
+		memset(&hnslot, 0, sizeof(hnslot));
+		memset(&hbslot, 0, sizeof(hbslot));
+	}
 
 	/*
 	 * Calculate selectivity comparing the lower or upper bound of the
@@ -492,10 +598,16 @@ calc_hist_selectivity(TypeCacheEntry *typcache, VariableStatData *vardata,
 			break;
 
 		case OID_RANGE_LEFT_OP:
+			/*
+			* DBSA PROJECT strictly left of << selectivity function
+			*/
 			/* var << const when upper(var) < lower(const) */
-			hist_selec =
-				calc_hist_selectivity_scalar(typcache, &const_lower,
-											 hist_upper, nhist, false);
+			hist_selec = calc_equi_hist_selectivity_left(
+				typcache, lowerDistance, hist_vals, num_bins, totalBinSum, binWidth
+			);
+			// hist_selec =
+			// 	calc_hist_selectivity_scalar(typcache, &const_lower,
+			// 								 hist_upper, nhist, false);
 			break;
 
 		case OID_RANGE_RIGHT_OP:
@@ -520,6 +632,13 @@ calc_hist_selectivity(TypeCacheEntry *typcache, VariableStatData *vardata,
 			break;
 
 		case OID_RANGE_OVERLAP_OP:
+			/*
+			* DBSA PROJECT overlaps && selectivity function
+			*/
+			hist_selec = calc_equi_hist_selectivity_overlap(
+				typcache, lowerDistance, upperDistance, hist_vals, num_bins, totalBinSum, binWidth
+			);
+			break;
 		case OID_RANGE_CONTAINS_ELEM_OP:
 
 			/*
@@ -583,8 +702,63 @@ calc_hist_selectivity(TypeCacheEntry *typcache, VariableStatData *vardata,
 
 	free_attstatsslot(&lslot);
 	free_attstatsslot(&hslot);
+	//DBSAP -> Free slots
+	free_attstatsslot(&hvslot);
+	free_attstatsslot(&hnslot);
+	free_attstatsslot(&hbslot);
 
 	return hist_selec;
+}
+
+static double
+calc_equi_hist_selectivity_left(TypeCacheEntry *typcache, const float lowerDistance,
+								const int64 *hist, const int num_bins, const float totalBinSum, const float binWidth)
+{
+	Selectivity selec;
+
+	float8* histogramX = (float8*)palloc(num_bins * sizeof(float8));
+	float8* histogramY = (float8*)palloc(num_bins * sizeof(float8));
+	for (int i = 0; i < num_bins; ++i) {
+		histogramX[i] = binWidth * i;
+		histogramY[i] = (float8)hist[i];
+	}
+	selec = calculate_range_left_of_fraction(
+		histogramX, histogramY, 0.0, binWidth * num_bins, num_bins, lowerDistance
+	);
+	return selec;
+
+	// int bin = (int)(lowerDistance / binWidth);
+	// float reminder = (lowerDistance / binWidth) - bin;
+	// fprintf(stderr, "BinWidth: %f\n", binWidth);
+	// fprintf(stderr, "Division: %f\n", (lowerDistance / binWidth));
+	// fprintf(stderr, "Reminder: %f\n", reminder);
+	// fprintf(stderr, "LowerDistance: %f -> Bin: %i\n", lowerDistance, bin);
+	// float sum = 0;
+	// for (int i = 0; i < bin; ++i) {
+	// 	sum += hist[i];
+	// }
+	// sum += hist[bin] * reminder;
+	// fprintf(stderr, "Sum: %f, Total: %f\n", sum, totalBinSum);
+	// selec = sum / totalBinSum;
+	// return selec;
+}
+
+static double
+calc_equi_hist_selectivity_overlap(TypeCacheEntry *typcache, const float lowerDistance, const float upperDistance,
+								const int64 *hist, const int num_bins, const float totalBinSum, const float binWidth)
+{
+	Selectivity selec;
+
+	float8* histogramX = (float8*)palloc(num_bins * sizeof(float8));
+	float8* histogramY = (float8*)palloc(num_bins * sizeof(float8));
+	for (int i = 0; i < num_bins; ++i) {
+		histogramX[i] = binWidth * i;
+		histogramY[i] = (float8)hist[i];
+	}
+	selec = calculate_range_overlap_fraction(
+		histogramX, histogramY, 0.0, binWidth * num_bins, num_bins, lowerDistance, upperDistance
+	);
+	return selec;
 }
 
 
