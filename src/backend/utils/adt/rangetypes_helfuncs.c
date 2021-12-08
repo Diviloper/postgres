@@ -216,21 +216,15 @@ double calculate_range_join_overlap_fraction(
 	fprintf(stderr, "Start: %f\n", start);
 	fprintf(stderr, "End: %f\n", end);
 
-	double intersection = 0;
 	if (start < end) {
-		int num_sections = 1;
-		double sections = (end - start) / num_sections;
-		for (int i = 0; i < num_sections; ++i) {
-			intersect_a = trapezoidal(coefficients_a, order, start + sections * i, start + sections * (i+1), integ_squares);
-			intersect_b = trapezoidal(coefficients_b, order, start + sections * i, start + sections * (i+1), integ_squares);
-			intersection += intersect_a * intersect_b;
-		}
+		intersect_a = trapezoidal(coefficients_a, order, start, end, integ_squares);
+		intersect_b = trapezoidal(coefficients_b, order, start, end, integ_squares);
 	}
 	else {
 		fprintf(stderr, "No intersections\n");
 		return 0;
 	}
-	final_result = intersection / (integ_a * integ_b);
+	final_result = (intersect_a / integ_a) * (intersect_b / integ_b);
 
 	fprintf(stderr, "integ_a:\t%f\n", integ_a);
 	fprintf(stderr, "integ_b:\t%f\n", integ_b);
